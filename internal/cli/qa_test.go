@@ -432,6 +432,12 @@ func TestQARunEvidenceDiagnosticAttribution(t *testing.T) {
 			wantReason: "invalid_type",
 		},
 		{
+			name:       "unknown field with terminal escape bytes",
+			data:       "[{\"id\": \"x\", \"evil\\u001b[31m\\u001b[0m\": 1}]",
+			wantField:  "evil??31m??0m",
+			wantReason: "unknown_field",
+		},
+		{
 			name:       "duplicate id across records",
 			data:       `[{"id": "dup"}, {"id": "dup"}]`,
 			wantField:  "id",

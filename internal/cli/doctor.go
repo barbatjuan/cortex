@@ -247,7 +247,17 @@ const (
 		"Use a catalog root directory containing catalog.json (for example, ./catalog):\n" +
 		"cortex qa run --role requirements-analyst --request request.txt --catalog ./catalog\n" +
 		"Optional evidence sidecar (--evidence evidence.json): a JSON array of execution records\n" +
+		"(up to 8 records, <= 48 KiB total; custom top-level shapes like {\"schema\":...} are rejected).\n" +
+		"Record fields:\n" +
+		"  - id (string, required): unique record identifier, trimmed, non-empty\n" +
+		"  - command (string, optional): executed command invocation\n" +
+		"  - exit_code (integer, optional): process exit code\n" +
+		"  - output_tail (string, optional): tail of command output (<= 4096 bytes)\n" +
+		"  - provenance (string, optional): origin or fixture source\n" +
+		"  - truncated (boolean, optional): true if output was truncated\n" +
+		"Example:\n" +
 		`[{"id":"selected-test","command":"go test ./...","exit_code":0,"output_tail":"ok example","provenance":"caller fixture","truncated":false}]` + "\n" +
+		"Schema reference: docs/operating.md\n" +
 		"To audit a code diff, prefix every diff line with '>' (blockquote): quoted lines are content,\n" +
 		"so frame directives stay rejected while the quoted diff passes validation (issue #305).\n"
 	rootHelp = "usage: cortex <command> [arguments]\ncommands: doctor, install, update, uninstall, qa\noptions: --version, --help\n" +
@@ -331,7 +341,18 @@ func runQA(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if evidencePath != "" {
 		evidence, err = readQAFile(evidencePath, qapi.MaxEvidenceBytes)
 		if err != nil {
-			return qaFailure(stderr, "invalid_request")
+			failure := qaFailure(stderr, "invalid_request")
+			if os.IsNotExist(err) || errors.Is(err, os.ErrNotExist) {
+				_, _ = fmt.Fprintf(stderr, "evidence_field=path evidence_reason=file_not_found\n")
+			} else if stat, statErr := os.Stat(evidencePath); statErr == nil && stat.Size() > int64(qapi.MaxEvidenceBytes) {
+				_, _ = fmt.Fprintf(stderr, "evidence_field=top-level evidence_reason=exceeds_size\n")
+				_, _ = fmt.Fprintf(stderr, "evidence_detail=file size %d exceeds %d bytes\n", stat.Size(), qapi.MaxEvidenceBytes)
+			} else if stat, statErr := os.Stat(evidencePath); statErr == nil && stat.IsDir() {
+				_, _ = fmt.Fprintf(stderr, "evidence_field=path evidence_reason=not_a_file\n")
+			} else {
+				_, _ = fmt.Fprintf(stderr, "evidence_field=path evidence_reason=file_unavailable\n")
+			}
+			return failure
 		}
 	}
 	cwd, err := os.Getwd()
@@ -355,6 +376,17 @@ func runQA(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			return exitFailure
 		}
 		failure := qaFailure(stderr, string(code))
+		var evidenceErr *qapi.EvidenceValidationError
+		if errors.As(err, &evidenceErr) {
+			if evidenceErr.Field != "" {
+				_, _ = fmt.Fprintf(stderr, "evidence_field=%s evidence_reason=%s\n", evidenceErr.Field, evidenceErr.Reason)
+			} else {
+				_, _ = fmt.Fprintf(stderr, "evidence_reason=%s\n", evidenceErr.Reason)
+			}
+			if evidenceErr.Detail != "" {
+				_, _ = fmt.Fprintf(stderr, "evidence_detail=%s\n", evidenceErr.Detail)
+			}
+		}
 		if diagnostic := qaAdmissionDiagnostic(err); diagnostic != "" {
 			_, _ = io.WriteString(stderr, diagnostic)
 		}

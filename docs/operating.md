@@ -193,6 +193,24 @@ run looks like, and where it currently stops:
    The sidecar must be a JSON array of execution records; the report evaluates them
    and never runs commands itself. On success the report is the only stdout output;
    the retained stream lands in `.cortex/qa-streams/` for audit.
+
+   **Evidence record schema:**
+
+   `cortex qa run --evidence <file.json>` requires a top-level JSON array containing up to 8
+   execution records, bounded at 48 KiB (49,152 bytes) total. Custom top-level shapes (such as
+   `{"schema": ..., "candidate": ..., "evidence": [...]}`) are rejected with explicit attribution.
+
+   Each record must be a JSON object admitting only the following fields:
+
+   - `id` (string, required): unique record identifier, non-empty, trimmed, no control characters.
+   - `command` (string, optional): executed command line invocation.
+   - `exit_code` (integer, optional): process exit status code (e.g. `0`, `1`). Non-integer numbers or strings are rejected.
+   - `output_tail` (string, optional): tail of standard output/error, bounded to 4096 bytes.
+   - `provenance` (string, optional): description of origin or caller fixture source.
+   - `truncated` (boolean, optional): whether captured output was truncated (`true`/`false`).
+
+   Validation is strict: unknown fields, missing required fields, type mismatches, or duplicate
+   keys fail closed with diagnostic tokens `evidence_field=<field> evidence_reason=<reason>`.
 4. **Known blockers (2026-10-19 walkthrough).** No backend completes the green run yet:
    pi hits provider transport failures misreported as `normalization_failed` (#326);
    claude streams from live Claude Code 2.1.303 are rejected on informational

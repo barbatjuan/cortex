@@ -3,6 +3,7 @@ package qapi
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"testing"
@@ -57,6 +58,56 @@ func TestEvidenceValidation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := validateEvidence([]byte(tc.data)); (err == nil) != tc.valid {
 				t.Fatalf("validation = %v, want valid %t", err, tc.valid)
+			}
+		})
+	}
+}
+
+func TestEvidenceValidationDiagnostics(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		data       string
+		wantField  string
+		wantReason string
+	}{
+		{"custom top-level shape with schema", `{"schema":"cortex.qa.evidence.v1","candidate":"cand","evidence":[]}`, "top-level", "expected_array"},
+		{"object top-level", `{"diff":"...","pytest":"40 passed"}`, "top-level", "expected_array"},
+		{"null top-level", `null`, "top-level", "expected_array"},
+		{"primitive number top-level", `42`, "top-level", "expected_array"},
+		{"empty payload", ``, "top-level", "empty_payload"},
+		{"malformed JSON", `[{`, "top-level", "malformed_json"},
+		{"trailing JSON", `[] []`, "top-level", "malformed_json"},
+		{"too many records", `[{"id":"1"},{"id":"2"},{"id":"3"},{"id":"4"},{"id":"5"},{"id":"6"},{"id":"7"},{"id":"8"},{"id":"9"}]`, "records", "exceeds_limit"},
+		{"record not object", `["string"]`, "record", "expected_object"},
+		{"unknown field", `[{"id":"x","diff":"..."}]`, "diff", "unknown_field"},
+		{"missing id", `[{"command":"go test"}]`, "id", "missing_field"},
+		{"empty id", `[{"id":""}]`, "id", "empty_field"},
+		{"untrimmed id", `[{"id":" x "}]`, "id", "untrimmed"},
+		{"control character id", `[{"id":"a\nb"}]`, "id", "control_character"},
+		{"duplicate id", `[{"id":"x"},{"id":"x"}]`, "id", "duplicate_id"},
+		{"duplicate field", `[{"id":"x","exit_code":1,"exit_code":0}]`, "exit_code", "duplicate_field"},
+		{"wrong exit_code string", `[{"id":"x","exit_code":"0"}]`, "exit_code", "invalid_type"},
+		{"wrong exit_code float", `[{"id":"x","exit_code":0.5}]`, "exit_code", "invalid_type"},
+		{"wrong output_tail type", `[{"id":"x","output_tail":123}]`, "output_tail", "invalid_type"},
+		{"output_tail exceeds 4096", `[{"id":"x","output_tail":"` + strings.Repeat("a", 4097) + `"}]`, "output_tail", "exceeds_length"},
+		{"wrong command type", `[{"id":"x","command":123}]`, "command", "invalid_type"},
+		{"wrong provenance type", `[{"id":"x","provenance":{}}]`, "provenance", "invalid_type"},
+		{"wrong truncated type", `[{"id":"x","truncated":"false"}]`, "truncated", "invalid_type"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateEvidence([]byte(tc.data))
+			if err == nil {
+				t.Fatalf("validateEvidence(%s) succeeded, want error", tc.data)
+			}
+			var valErr *EvidenceValidationError
+			if !errors.As(err, &valErr) {
+				t.Fatalf("err is %T (%v), want *EvidenceValidationError", err, err)
+			}
+			if valErr.Field != tc.wantField || valErr.Reason != tc.wantReason {
+				t.Fatalf("got field=%q reason=%q, want field=%q reason=%q", valErr.Field, valErr.Reason, tc.wantField, tc.wantReason)
+			}
+			if !strings.Contains(valErr.Error(), tc.wantField) || !strings.Contains(valErr.Error(), tc.wantReason) {
+				t.Fatalf("Error() %q missing field or reason", valErr.Error())
 			}
 		})
 	}

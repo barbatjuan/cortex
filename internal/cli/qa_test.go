@@ -244,7 +244,7 @@ func TestQAHelpDocumentsEvidenceSidecarSchema(t *testing.T) {
 	if code := Run(context.Background(), []string{"qa", "--help"}, stdout, io.Discard, nil); code != exitOK {
 		t.Fatalf("qa --help exit = %d", code)
 	}
-	for _, field := range []string{"exit_code", "output_tail", "provenance", "truncated"} {
+	for _, field := range []string{"id", "command", "exit_code", "output_tail", "provenance", "truncated", "docs/operating.md"} {
 		if !strings.Contains(stdout.String(), field) {
 			t.Fatalf("qa --help = %q, want the evidence schema field %q documented", stdout.String(), field)
 		}
@@ -390,6 +390,74 @@ func TestQARunRejectsEvidenceInputs(t *testing.T) {
 		if code := Run(context.Background(), append(args, options...), io.Discard, io.Discard, nil); code != exitUsage {
 			t.Fatalf("invalid options %q = %d", options, code)
 		}
+	}
+}
+
+func TestQARunEvidenceDiagnosticAttribution(t *testing.T) {
+	args := reportFixture(t)
+	for _, tc := range []struct {
+		name       string
+		data       string
+		wantField  string
+		wantReason string
+	}{
+		{
+			name:       "custom top-level shape with schema",
+			data:       `{"schema": "cortex.qa.evidence.v1", "candidate": "cand", "evidence": []}`,
+			wantField:  "top-level",
+			wantReason: "expected_array",
+		},
+		{
+			name:       "custom top-level shape with diff",
+			data:       `{"diff": "...", "pytest": "40 passed"}`,
+			wantField:  "top-level",
+			wantReason: "expected_array",
+		},
+		{
+			name:       "unknown field in record",
+			data:       `[{"id": "test-1", "diff": "line"}]`,
+			wantField:  "diff",
+			wantReason: "unknown_field",
+		},
+		{
+			name:       "missing id in record",
+			data:       `[{"command": "go test"}]`,
+			wantField:  "id",
+			wantReason: "missing_field",
+		},
+		{
+			name:       "invalid exit_code type",
+			data:       `[{"id": "test-1", "exit_code": "0"}]`,
+			wantField:  "exit_code",
+			wantReason: "invalid_type",
+		},
+		{
+			name:       "duplicate id across records",
+			data:       `[{"id": "dup"}, {"id": "dup"}]`,
+			wantField:  "id",
+			wantReason: "duplicate_id",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "evidence.json")
+			mustOK(os.WriteFile(path, []byte(tc.data), 0o600))
+			stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+			code := Run(context.Background(), append(args, "--evidence", path), stdout, stderr, nil)
+			if code != exitFailure {
+				t.Fatalf("exit code = %d, want %d", code, exitFailure)
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q, want empty", stdout.String())
+			}
+			errOut := stderr.String()
+			if !strings.HasPrefix(errOut, "error=invalid_request\n") {
+				t.Fatalf("stderr %q lacks error=invalid_request prefix", errOut)
+			}
+			wantFieldLine := fmt.Sprintf("evidence_field=%s evidence_reason=%s\n", tc.wantField, tc.wantReason)
+			if !strings.Contains(errOut, wantFieldLine) {
+				t.Fatalf("stderr %q does not contain %q", errOut, wantFieldLine)
+			}
+		})
 	}
 }
 

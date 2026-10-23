@@ -379,7 +379,7 @@ func runQA(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		var evidenceErr *qapi.EvidenceValidationError
 		if errors.As(err, &evidenceErr) {
 			if evidenceErr.Field != "" {
-				_, _ = fmt.Fprintf(stderr, "evidence_field=%s evidence_reason=%s\n", evidenceErr.Field, evidenceErr.Reason)
+				_, _ = fmt.Fprintf(stderr, "evidence_field=%s evidence_reason=%s\n", sanitizeDiagnosticField(evidenceErr.Field), evidenceErr.Reason)
 			} else {
 				_, _ = fmt.Fprintf(stderr, "evidence_reason=%s\n", evidenceErr.Reason)
 			}
@@ -422,6 +422,23 @@ func runQA(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return exitFailure
 	}
 	return exitOK
+}
+
+// sanitizeDiagnosticField renders a diagnostic field label (which may come from
+// caller-supplied JSON key names) safe for terminal output: only printable ASCII
+// word characters survive; every other byte collapses to "?" so escape and
+// control sequences cannot reach the operator's terminal.
+func sanitizeDiagnosticField(field string) string {
+	var b strings.Builder
+	b.Grow(len(field))
+	for _, r := range field {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' {
+			b.WriteRune(r)
+			continue
+		}
+		b.WriteByte('?')
+	}
+	return b.String()
 }
 
 func qaFailure(stderr io.Writer, code string) int {

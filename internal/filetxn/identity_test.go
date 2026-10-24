@@ -3,6 +3,7 @@ package filetxn
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -50,19 +51,32 @@ func TestDirectoryIdentity(t *testing.T) {
 			t.Fatalf("replacement kept inode %d", before)
 		}
 	})
-	t.Run("never the replacement identity for a stale lstat", func(t *testing.T) {
+	t.Run("stale lstat never yields the replacement identity", func(t *testing.T) {
 		root := t.TempDir()
-		must(t, os.Mkdir(filepath.Join(root, "made"), 0o700))
-		stale, err := os.Lstat(filepath.Join(root, "made"))
+		path := filepath.Join(root, "made")
+		must(t, os.Mkdir(path, 0o700))
+		_, original := lstatDirectoryIdentity(t, path)
+		stale, err := os.Lstat(path)
 		must(t, err)
 		// Pin the lazily loaded Windows identity, as callers do with os.SameFile.
 		if !os.SameFile(stale, stale) {
 			t.Fatal("stale directory identity is unavailable")
 		}
 		replaceDirectoryWithDistinctIdentity(t, root, "made")
-		_, currentInode := lstatDirectoryIdentity(t, filepath.Join(root, "made"))
-		if _, inode, ok := directoryIdentity(filepath.Join(root, "made"), stale); ok && inode == currentInode {
-			t.Fatalf("stale lstat result reported the replacement identity %d", inode)
+		// A fresh Lstat still resolves, so a refusal below can only come from
+		// the stale result, not from an unreadable path.
+		_, current := lstatDirectoryIdentity(t, path)
+		_, inode, ok := directoryIdentity(path, stale)
+		if runtime.GOOS == "windows" {
+			// The identity is read from the path, which no longer names stale.
+			if ok {
+				t.Fatalf("stale lstat reported identity %d, want refusal", inode)
+			}
+			return
+		}
+		// On unix the identity is part of the Lstat result itself.
+		if !ok || inode != original || inode == current {
+			t.Fatalf("stale lstat identity = %d, %v; want original %d, distinct from %d", inode, ok, original, current)
 		}
 	})
 }

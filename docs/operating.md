@@ -79,8 +79,11 @@ runtime=directory presence=present compatibility=compatible action=configure tou
 ```
 
 - `error=invalid_target` (exit 64) — the path is missing, relative, or not a directory.
-  Doctor, update, and uninstall refuse a relative or unclean `--target-dir` the same way,
-  before reading or writing the directory.
+  Doctor, update, and uninstall refuse an empty, relative, or unclean `--target-dir` with the
+  same error before reading or writing anything; an empty value never falls back to the
+  runtime mode. A missing absolute target keeps each command's own answer (doctor reports
+  `presence=absent`, update refuses with `reason=target_absent`), and uninstall also
+  refuses a filesystem root.
 - Update and uninstall work on the recorded ownership:
   `cortex update --target-dir <dir> --catalog ./catalog [--apply]` (a target with no prior
   state is refused with `reason=not_installed` instead of becoming a first install), and

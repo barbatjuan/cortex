@@ -3,10 +3,14 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/refactor-ia/cortex/internal/skillroot"
 )
 
 // directoryLifecycleInstall installs the shipped catalog into a target
@@ -127,6 +131,19 @@ func TestUninstallDirectoryTargetRemovesOnlyOwnedFiles(t *testing.T) {
 	}
 }
 
+// guardedUninstallDependencies fails the test if a command falls back to the
+// canonical all-roots uninstall, so a refusal test can never reach the real
+// user home even when the refusal is missing.
+func guardedUninstallDependencies(t *testing.T) uninstallDependencies {
+	t.Helper()
+	deps := defaultUninstallDependencies()
+	deps.resolveRoots = func() ([]skillroot.UninstallRoot, error) {
+		t.Error("canonical uninstall roots were resolved")
+		return nil, errors.New("canonical uninstall roots must not be resolved")
+	}
+	return deps
+}
+
 // TestDirectoryTargetCommandsRefuseRelativeTargets pins issue #372: every
 // command that consumes --target-dir refuses a path install would refuse,
 // with the same diagnostic and exit code, and writes nothing.
@@ -139,18 +156,18 @@ func TestDirectoryTargetCommandsRefuseRelativeTargets(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(existing, "foreign-sentinel.txt"), []byte("user bytes"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	listing := func() []string {
+	listing := func(root string) string {
 		var names []string
-		err := filepath.WalkDir(existing, func(path string, _ os.DirEntry, err error) error {
+		err := filepath.WalkDir(root, func(path string, _ os.DirEntry, err error) error {
 			names = append(names, path)
 			return err
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		return names
+		return strings.Join(names, "\n")
 	}
-	before := listing()
+	before := listing(existing)
 	// Extra arguments make each command reach its target check: update gets a
 	// valid catalog and --apply so a refusal cannot come from the catalog.
 	commands := map[string][]string{
@@ -164,21 +181,29 @@ func TestDirectoryTargetCommandsRefuseRelativeTargets(t *testing.T) {
 		t.Fatal(err)
 	}
 	// unclean is absolute and names the existing directory, so only the clean
-	// check can refuse it.
+	// check can refuse it. empty is what an unset shell variable passes.
 	unclean := cwd + string(filepath.Separator) + "." + string(filepath.Separator) + existing
-	targets := map[string]string{"existing": existing, "missing": "relative/missing-target", "unclean": unclean}
+	targets := map[string]string{"existing": existing, "missing": "relative/missing-target", "unclean": unclean, "empty": ""}
+	if runtime.GOOS == "windows" {
+		volume := filepath.VolumeName(cwd)
+		targets["drive-relative"] = volume + existing
+		targets["rooted-without-drive"] = strings.TrimPrefix(cwd, volume) + `\` + existing
+		targets["mixed-separators"] = cwd + "/" + existing
+	}
 	for command, extra := range commands {
 		for name, target := range targets {
 			t.Run(command+"/"+name, func(t *testing.T) {
 				home := canonicalHome(t)
-				var stdout, stderr bytes.Buffer
 				args := append([]string{command, "--target-dir", target}, extra...)
-				code := runWithDependencies(context.Background(), args, &stdout, &stderr, nil, directoryInstallDependencies(t, home), defaultUninstallDependencies())
-				if code != exitUsage || stdout.Len() != 0 || stderr.String() != "error=invalid_target\n" {
-					t.Fatalf("exit = %d stdout = %q stderr = %q, want %d \"\" %q", code, stdout.String(), stderr.String(), exitUsage, "error=invalid_target\n")
+				code, stdout, stderr := runRefusal(t, home, args)
+				if code != exitUsage || stdout != "" || stderr != invalidTargetRefusal {
+					t.Fatalf("exit = %d stdout = %q stderr = %q, want %d \"\" %q", code, stdout, stderr, exitUsage, invalidTargetRefusal)
 				}
-				if after := listing(); strings.Join(after, "\n") != strings.Join(before, "\n") {
+				if after := listing(existing); after != before {
 					t.Fatalf("relative target changed: %q, want %q", after, before)
+				}
+				if after := listing(home); after != home {
+					t.Fatalf("home changed on refusal: %q", after)
 				}
 				if _, err := os.Stat("relative"); !os.IsNotExist(err) {
 					t.Fatalf("missing relative target was created: %v", err)
@@ -186,4 +211,26 @@ func TestDirectoryTargetCommandsRefuseRelativeTargets(t *testing.T) {
 			})
 		}
 	}
+	t.Run("install/equals-form", func(t *testing.T) {
+		code, stdout, stderr := runRefusal(t, canonicalHome(t), []string{"install", "--target-dir=" + existing})
+		if code != exitUsage || stdout != "" || stderr != invalidTargetRefusal {
+			t.Fatalf("exit = %d stdout = %q stderr = %q", code, stdout, stderr)
+		}
+	})
+	t.Run("update/target-checked-before-catalog", func(t *testing.T) {
+		code, stdout, stderr := runRefusal(t, canonicalHome(t), []string{"update", "--target-dir", existing, "--catalog", "missing-catalog", "--apply"})
+		if code != exitUsage || stdout != "" || stderr != invalidTargetRefusal {
+			t.Fatalf("exit = %d stdout = %q stderr = %q", code, stdout, stderr)
+		}
+	})
+}
+
+const invalidTargetRefusal = "error=invalid_target\n"
+
+// runRefusal runs one CLI invocation with guarded uninstall dependencies.
+func runRefusal(t *testing.T, home string, args []string) (int, string, string) {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	code := runWithDependencies(context.Background(), args, &stdout, &stderr, nil, directoryInstallDependencies(t, home), guardedUninstallDependencies(t))
+	return code, stdout.String(), stderr.String()
 }

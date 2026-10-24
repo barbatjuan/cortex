@@ -61,11 +61,12 @@ func directoryIdentity(path string, info os.FileInfo) (device, inode uint64, ok 
 // os package does when the Go runtime cannot opt the process into long-path
 // support (Windows builds before 10.0.15063). Prefixing every long path keeps
 // the identity read independent of that opt-in and of the LongPathsEnabled
-// registry value. Short, relative, unclean, or already extended paths are
-// returned unchanged.
+// registry value. Short, relative, unclean, already extended, or device
+// (\\.\) paths are returned unchanged; os also leaves device paths alone,
+// because the prefix would change their meaning.
 func extendedLengthPath(path string) string {
 	const maxShortDirectory = 248 // MAX_PATH minus room for an 8.3 name, as in os
-	if len(path) < maxShortDirectory || !filepath.IsAbs(path) || filepath.Clean(path) != path || strings.HasPrefix(path, `\\?\`) {
+	if len(path) < maxShortDirectory || !filepath.IsAbs(path) || filepath.Clean(path) != path || strings.HasPrefix(path, `\\?\`) || strings.HasPrefix(path, `\\.\`) {
 		return path
 	}
 	if strings.HasPrefix(path, `\\`) {

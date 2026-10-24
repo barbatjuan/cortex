@@ -44,6 +44,10 @@ func directoryIdentity(path string, info os.FileInfo) (device, inode uint64, ok 
 	if err != nil || !os.SameFile(info, opened) {
 		return 0, 0, false
 	}
+	// The file index is the full NTFS file ID. ReFS volumes (including Dev
+	// Drives) use 128-bit IDs that this 64-bit index does not cover, so
+	// uniqueness there is not guaranteed; the persisted identity stays
+	// uint64 until the Windows semantics design decides otherwise (#389).
 	index := uint64(data.FileIndexHigh)<<32 | uint64(data.FileIndexLow)
 	if index == 0 {
 		return 0, 0, false

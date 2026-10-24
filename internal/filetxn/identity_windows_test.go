@@ -71,6 +71,11 @@ func TestDirectoryIdentityWindowsRefusals(t *testing.T) {
 			t.Fatal("stale lstat reported an identity for the replacement")
 		}
 	})
+	// The Go runtime opts every process into long-path support at startup
+	// (initLongPathSupport sets the PEB flag on Windows 10 1703 and later),
+	// and the os package then skips its own \\?\ prefix, so os.MkdirAll and
+	// syscall.CreateFile resolve long paths the same way regardless of the
+	// LongPathsEnabled registry value.
 	t.Run("path longer than MAX_PATH", func(t *testing.T) {
 		path := t.TempDir()
 		for len(path) <= 300 {

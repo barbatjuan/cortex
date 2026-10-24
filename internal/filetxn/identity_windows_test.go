@@ -29,6 +29,23 @@ func pinnedLstat(t *testing.T, path string) os.FileInfo {
 	return info
 }
 
+func TestExtendedLengthPath(t *testing.T) {
+	long := `C:\` + strings.Repeat(`d\`, 130) + "leaf"
+	unc := `\\server\share\` + strings.Repeat(`d\`, 130) + "leaf"
+	for _, test := range []struct{ name, path, want string }{
+		{"short absolute", `C:\short\dir`, `C:\short\dir`},
+		{"long absolute", long, `\\?\` + long},
+		{"long UNC", unc, `\\?\UNC\` + unc[2:]},
+		{"already extended", `\\?\` + long, `\\?\` + long},
+		{"long relative", strings.Repeat(`d\`, 130) + "leaf", strings.Repeat(`d\`, 130) + "leaf"},
+		{"long unclean", long + `\.\x`, long + `\.\x`},
+	} {
+		if got := extendedLengthPath(test.path); got != test.want {
+			t.Errorf("%s: extendedLengthPath(%q) = %q, want %q", test.name, test.path, got, test.want)
+		}
+	}
+}
+
 func TestDirectoryIdentityWindowsRefusals(t *testing.T) {
 	t.Run("regular file", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "file.txt")
@@ -71,11 +88,8 @@ func TestDirectoryIdentityWindowsRefusals(t *testing.T) {
 			t.Fatal("stale lstat reported an identity for the replacement")
 		}
 	})
-	// The Go runtime opts every process into long-path support at startup
-	// (initLongPathSupport sets the PEB flag on Windows 10 1703 and later),
-	// and the os package then skips its own \\?\ prefix, so os.MkdirAll and
-	// syscall.CreateFile resolve long paths the same way regardless of the
-	// LongPathsEnabled registry value.
+	// directoryIdentity opens every long path through the \\?\ prefix, so this
+	// holds without the runtime long-path opt-in or the LongPathsEnabled value.
 	t.Run("path longer than MAX_PATH", func(t *testing.T) {
 		path := t.TempDir()
 		for len(path) <= 300 {

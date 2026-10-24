@@ -4,6 +4,8 @@ package filetxn
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -15,7 +17,7 @@ func directoryIdentity(path string, info os.FileInfo) (device, inode uint64, ok 
 	if !isRealDirectory(info) {
 		return 0, 0, false
 	}
-	name, err := syscall.UTF16PtrFromString(path)
+	name, err := syscall.UTF16PtrFromString(extendedLengthPath(path))
 	if err != nil {
 		return 0, 0, false
 	}
@@ -53,4 +55,21 @@ func directoryIdentity(path string, info os.FileInfo) (device, inode uint64, ok 
 		return 0, 0, false
 	}
 	return uint64(data.VolumeSerialNumber), index, true
+}
+
+// extendedLengthPath adds the \\?\ prefix to a long clean absolute path, as the
+// os package does when the Go runtime cannot opt the process into long-path
+// support (Windows builds before 10.0.15063). Prefixing every long path keeps
+// the identity read independent of that opt-in and of the LongPathsEnabled
+// registry value. Short, relative, unclean, or already extended paths are
+// returned unchanged.
+func extendedLengthPath(path string) string {
+	const maxShortDirectory = 248 // MAX_PATH minus room for an 8.3 name, as in os
+	if len(path) < maxShortDirectory || !filepath.IsAbs(path) || filepath.Clean(path) != path || strings.HasPrefix(path, `\\?\`) {
+		return path
+	}
+	if strings.HasPrefix(path, `\\`) {
+		return `\\?\UNC\` + path[2:]
+	}
+	return `\\?\` + path
 }

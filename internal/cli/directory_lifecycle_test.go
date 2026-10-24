@@ -126,3 +126,64 @@ func TestUninstallDirectoryTargetRemovesOnlyOwnedFiles(t *testing.T) {
 		t.Fatalf("owned skill files must be removed, left: %v", leftover)
 	}
 }
+
+// TestDirectoryTargetCommandsRefuseRelativeTargets pins issue #372: every
+// command that consumes --target-dir refuses a path install would refuse,
+// with the same diagnostic and exit code, and writes nothing.
+func TestDirectoryTargetCommandsRefuseRelativeTargets(t *testing.T) {
+	const existing = "test-relative-target-372"
+	if err := os.MkdirAll(existing, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(existing) })
+	if err := os.WriteFile(filepath.Join(existing, "foreign-sentinel.txt"), []byte("user bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	listing := func() []string {
+		var names []string
+		err := filepath.WalkDir(existing, func(path string, _ os.DirEntry, err error) error {
+			names = append(names, path)
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return names
+	}
+	before := listing()
+	// Extra arguments make each command reach its target check: update gets a
+	// valid catalog and --apply so a refusal cannot come from the catalog.
+	commands := map[string][]string{
+		"install":   nil,
+		"doctor":    nil,
+		"update":    {"--catalog", "../../catalog", "--apply"},
+		"uninstall": nil,
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// unclean is absolute and names the existing directory, so only the clean
+	// check can refuse it.
+	unclean := cwd + string(filepath.Separator) + "." + string(filepath.Separator) + existing
+	targets := map[string]string{"existing": existing, "missing": "relative/missing-target", "unclean": unclean}
+	for command, extra := range commands {
+		for name, target := range targets {
+			t.Run(command+"/"+name, func(t *testing.T) {
+				home := canonicalHome(t)
+				var stdout, stderr bytes.Buffer
+				args := append([]string{command, "--target-dir", target}, extra...)
+				code := runWithDependencies(context.Background(), args, &stdout, &stderr, nil, directoryInstallDependencies(t, home), defaultUninstallDependencies())
+				if code != exitUsage || stdout.Len() != 0 || stderr.String() != "error=invalid_target\n" {
+					t.Fatalf("exit = %d stdout = %q stderr = %q, want %d \"\" %q", code, stdout.String(), stderr.String(), exitUsage, "error=invalid_target\n")
+				}
+				if after := listing(); strings.Join(after, "\n") != strings.Join(before, "\n") {
+					t.Fatalf("relative target changed: %q, want %q", after, before)
+				}
+				if _, err := os.Stat("relative"); !os.IsNotExist(err) {
+					t.Fatalf("missing relative target was created: %v", err)
+				}
+			})
+		}
+	}
+}

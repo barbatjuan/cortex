@@ -235,6 +235,10 @@ func buildUpdateCandidate(runtimeID runtimematrix.RuntimeID, catalogDir string, 
 // resolved into the caller-owned root, and readiness is revalidated through
 // installcoord.PreflightDirectoryTarget before any write.
 func runDirectoryUpdate(stdout, stderr io.Writer, targetDir, catalogDir string, apply bool) int {
+	if !validTargetDir(targetDir) {
+		writeError(stderr, "invalid_target")
+		return exitUsage
+	}
 	decision := runtimematrix.DirectoryTargetMatrix().Decisions[0]
 	info, err := os.Stat(targetDir)
 	if err != nil || !info.IsDir() {

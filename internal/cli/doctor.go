@@ -115,6 +115,10 @@ func runDoctorCommand(ctx context.Context, args []string, stdout, stderr io.Writ
 	if targetDir == "" {
 		return runDoctor(ctx, stdout, stderr, runner, policy, resolveRoots)
 	}
+	if !validTargetDir(targetDir) {
+		writeError(stderr, "invalid_target")
+		return exitUsage
+	}
 	return runDoctorDirectoryTarget(stdout, targetDir)
 }
 
@@ -591,6 +595,10 @@ func runUninstallCommand(args []string, stdout, stderr io.Writer, deps uninstall
 // runDirectoryUninstall removes exactly the Cortex-owned files of one
 // previously installed directory target and never touches foreign files.
 func runDirectoryUninstall(targetDir string, stdout, stderr io.Writer, deps uninstallDependencies) int {
+	if !validTargetDir(targetDir) {
+		writeError(stderr, "invalid_target")
+		return exitUsage
+	}
 	root, err := skillroot.NewUninstallRoot(runtimematrix.RuntimeDirectory, skilldest.RootKindDirectory, targetDir)
 	if err != nil {
 		writeError(stderr, "invalid_target")

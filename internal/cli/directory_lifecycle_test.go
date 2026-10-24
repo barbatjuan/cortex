@@ -181,9 +181,11 @@ func TestDirectoryTargetCommandsRefuseRelativeTargets(t *testing.T) {
 		t.Fatal(err)
 	}
 	// unclean is absolute and names the existing directory, so only the clean
-	// check can refuse it. empty is what an unset shell variable passes.
+	// check can refuse it. trailing-separator is the form shell completion
+	// produces. empty is what an unset shell variable passes.
 	unclean := cwd + string(filepath.Separator) + "." + string(filepath.Separator) + existing
-	targets := map[string]string{"existing": existing, "missing": "relative/missing-target", "unclean": unclean, "empty": ""}
+	trailing := filepath.Join(cwd, existing) + string(filepath.Separator)
+	targets := map[string]string{"existing": existing, "missing": "relative/missing-target", "unclean": unclean, "trailing-separator": trailing, "empty": ""}
 	if runtime.GOOS == "windows" {
 		volume := filepath.VolumeName(cwd)
 		targets["drive-relative"] = volume + existing
@@ -223,6 +225,46 @@ func TestDirectoryTargetCommandsRefuseRelativeTargets(t *testing.T) {
 			t.Fatalf("exit = %d stdout = %q stderr = %q", code, stdout, stderr)
 		}
 	})
+	// An explicit empty --runtime is a usage error, so the runtime mode never
+	// reaches the directory mode through an empty runtime ID.
+	t.Run("update/empty-runtime-is-a-usage-error", func(t *testing.T) {
+		code, stdout, stderr := runRefusal(t, canonicalHome(t), []string{"update", "--runtime", "", "--catalog", "../../catalog"})
+		if code != exitUsage || stdout != "" || stderr != "error=invalid_command\n" {
+			t.Fatalf("exit = %d stdout = %q stderr = %q", code, stdout, stderr)
+		}
+	})
+	// Control: the shared check must not over-refuse a valid absolute target.
+	t.Run("doctor/accepts-valid-absolute", func(t *testing.T) {
+		code, stdout, stderr := runRefusal(t, canonicalHome(t), []string{"doctor", "--target-dir", filepath.Join(cwd, existing)})
+		if code != exitOK || stderr != "" || !strings.Contains(stdout, " presence=present ") {
+			t.Fatalf("exit = %d stdout = %q stderr = %q", code, stdout, stderr)
+		}
+	})
+}
+
+func TestValidTargetDir(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sep := string(filepath.Separator)
+	for _, test := range []struct {
+		name   string
+		target string
+		want   bool
+	}{
+		{"absolute clean", filepath.Join(cwd, "agent-skills"), true},
+		{"relative", "agent-skills", false},
+		{"dot relative", "." + sep + "agent-skills", false},
+		{"unclean", cwd + sep + "." + sep + "agent-skills", false},
+		{"parent element", filepath.Join(cwd, "a") + sep + ".." + sep + "agent-skills", false},
+		{"trailing separator", filepath.Join(cwd, "agent-skills") + sep, false},
+		{"empty", "", false},
+	} {
+		if got := validTargetDir(test.target); got != test.want {
+			t.Errorf("%s: validTargetDir(%q) = %v, want %v", test.name, test.target, got, test.want)
+		}
+	}
 }
 
 const invalidTargetRefusal = "error=invalid_target\n"

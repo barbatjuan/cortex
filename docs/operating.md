@@ -79,7 +79,8 @@ runtime=directory presence=present compatibility=compatible action=configure tou
 ```
 
 - `error=invalid_target` (exit 64) — the path is missing, relative, or not a directory.
-  Doctor, update, and uninstall refuse an empty, relative, or unclean `--target-dir` with the
+  Doctor, update, and uninstall refuse an empty, relative, or unclean `--target-dir` (a
+  trailing separator counts as unclean: pass `/path/dir`, not `/path/dir/`) with the
   same error before reading or writing anything; an empty value never falls back to the
   runtime mode. A malformed command line is still refused first as `invalid_command` (for
   example `update --target-dir <dir>` without `--catalog`). A missing absolute target keeps each command's own answer (doctor reports

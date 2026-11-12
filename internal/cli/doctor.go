@@ -401,7 +401,7 @@ func runQA(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				_, _ = fmt.Fprintf(stderr, "evidence_reason=%s\n", evidenceErr.Reason)
 			}
 			if evidenceErr.Detail != "" {
-				_, _ = fmt.Fprintf(stderr, "evidence_detail=%s\n", evidenceErr.Detail)
+				_, _ = fmt.Fprintf(stderr, "evidence_detail=%s\n", escapeDiagnosticText(evidenceErr.Detail))
 			}
 		}
 		if diagnostic := qaAdmissionDiagnostic(err); diagnostic != "" {
@@ -472,6 +472,13 @@ func sanitizeRouteIdentity(value string) string {
 	if value == "" || len(value) > 128 {
 		return "<redacted>"
 	}
+	return escapeDiagnosticText(value)
+}
+
+// escapeDiagnosticText keeps printable ASCII and renders every other byte, and
+// the backslash itself, as \xNN, so caller-supplied text stays readable in a
+// terminal diagnostic without letting escape or control sequences through.
+func escapeDiagnosticText(value string) string {
 	var b strings.Builder
 	b.Grow(len(value))
 	for index := 0; index < len(value); index++ {
@@ -889,6 +896,9 @@ func writeUninstallResult(stdout, stderr io.Writer, results []uninstallPreflight
 	for _, result := range results {
 		remove, absent, conflict := uninstallCounts(result.observation)
 		_, _ = fmt.Fprintf(&output, "runtime=%s uninstall=%s remove=%d absent=%d conflict=%d", result.root.RuntimeID(), result.status, remove, absent, conflict)
+		if paths := result.observation.ConflictPaths(); len(paths) > 0 {
+			_, _ = fmt.Fprintf(&output, " conflict_paths=%s", strings.Join(paths, ","))
+		}
 		if paths := result.observation.UnsupportedActorPaths(); len(paths) > 0 {
 			unsupported = true
 			_, _ = fmt.Fprintf(&output, " reason=unsupported_installation state=validated_canonical_v3 recorded_actor_paths=%s", strings.Join(paths, ","))

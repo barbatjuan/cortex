@@ -83,9 +83,11 @@ runtime=directory presence=present compatibility=compatible action=configure tou
   trailing separator counts as unclean: pass `/path/dir`, not `/path/dir/`) with the
   same error before reading or writing anything; an empty value never falls back to the
   runtime mode. A malformed command line is still refused first as `invalid_command` (for
-  example `update --target-dir <dir>` without `--catalog`). A missing absolute target keeps each command's own answer (doctor reports
-  `presence=absent`, update refuses with `reason=target_absent`), and uninstall also
-  refuses a filesystem root.
+  example `update --target-dir <dir>` without `--catalog`). Update, like install, also
+  refuses an absolute target that is missing or not a directory as `invalid_target`
+  (exit 64): there is nothing to update. Doctor reports a missing target as
+  `presence=absent` instead of refusing it, uninstall refuses a missing target with
+  `uninstall=not_installed` and exit 3, and uninstall also refuses a filesystem root.
 - Update and uninstall work on the recorded ownership:
   `cortex update --target-dir <dir> --catalog ./catalog [--apply]` (a target with no prior
   state is refused with `reason=not_installed` instead of becoming a first install), and

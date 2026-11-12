@@ -140,18 +140,18 @@ func runWithUpdateDependencies(ctx context.Context, args []string, stdout, stder
 // default runtime or target. The two selection modes are mutually exclusive.
 func parseUpdateArgs(args []string) (runtimematrix.RuntimeID, string, bool, bool, string, bool) {
 	var runtimeID, catalogDir, targetDir string
-	apply, adoptGuidance, targetSet := false, false, false
+	apply, adoptGuidance, runtimeSet, targetSet := false, false, false, false
 	for len(args) > 0 {
 		flag := args[0]
 		args = args[1:]
 		switch flag {
 		case "--runtime":
-			if runtimeID != "" || targetSet || len(args) == 0 {
+			if runtimeSet || targetSet || len(args) == 0 {
 				return "", "", false, false, "", false
 			}
-			runtimeID, args = args[0], args[1:]
+			runtimeID, args, runtimeSet = args[0], args[1:], true
 		case "--target-dir":
-			if targetSet || runtimeID != "" || len(args) == 0 {
+			if targetSet || runtimeSet || len(args) == 0 {
 				return "", "", false, false, "", false
 			}
 			targetDir, args, targetSet = args[0], args[1:], true
@@ -239,15 +239,13 @@ func buildUpdateCandidate(runtimeID runtimematrix.RuntimeID, catalogDir string, 
 // resolved into the caller-owned root, and readiness is revalidated through
 // installcoord.PreflightDirectoryTarget before any write.
 func runDirectoryUpdate(stdout, stderr io.Writer, targetDir, catalogDir string, apply bool) int {
-	if !validTargetDir(targetDir) {
+	// A missing or non-directory target has nothing to update, so it is
+	// refused the same way install refuses it (issue #390).
+	if !usableTargetDir(targetDir) {
 		writeError(stderr, "invalid_target")
 		return exitUsage
 	}
 	decision := runtimematrix.DirectoryTargetMatrix().Decisions[0]
-	info, err := os.Stat(targetDir)
-	if err != nil || !info.IsDir() {
-		return writeUpdateRefusal(stdout, decision, "target_absent")
-	}
 	plan, err := buildDirectoryUpdateCandidate(targetDir, catalogDir)
 	if err != nil {
 		writeError(stderr, "invalid_catalog")
